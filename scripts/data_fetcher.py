@@ -264,6 +264,7 @@ class DataFetcher:
                 
                 el = driver.find_element(By.XPATH, '//*[@id="login_box"]/div[1]/div[1]/div[2]/span')
                 driver.execute_script("arguments[0].click();", el)
+                time.sleep(1)
                 #get canvas image
                 background_JS = 'return document.getElementById("slideVerify").childNodes[0].toDataURL("image/png");'
                 # targe_JS = 'return document.getElementsByClassName("slide-verify-block")[0].toDataURL("image/png");'
@@ -272,21 +273,28 @@ class DataFetcher:
                 background = im_info.split(',')[1]  
                 background_image = base64_to_PLI(background)
                 logging.info(f"Get electricity canvas image successfully.\r")
-                distance = self.onnx.get_distance(background_image)
-                # ONNX model detects on 416x416 space; scale to actual canvas width
+                # ONNX model expects square input; canvas is 410x200 (rectangular)
+                # Resize to square (416x416) before model inference, then scale back
                 canvas_width = driver.execute_script(
                     'return document.getElementById("slideVerify").childNodes[0].width;'
                 )
-                scale = canvas_width / 416.0
-                # https://github.com/ARC-MX/sgcc_electricity_new/issues/242
-                img_distance = distance * scale # 图片空缺的实际距离
+                canvas_height = driver.execute_script(
+                    'return document.getElementById("slideVerify").childNodes[0].height;'
+                )
+                logging.info(f"Canvas size: {canvas_width}x{canvas_height}\r")
+                # Resize to square for ONNX model
+                square_size = 416
+                background_image = background_image.resize((square_size, square_size), Image.LANCZOS)
+                distance = self.onnx.get_distance(background_image)
+                # Scale detected distance back to actual canvas width
+                img_distance = distance * (canvas_width / square_size)
                 
                 # 滑块滑动和图片空缺的移动不一致
-                max_sliding = 410 - 40 # 滑块最多可以滑动的距离  图片 - 滑块宽度 = 370
-                img_max_sliding = 418 - 68 # 图片最多可以滑动的距离 滑动到最大时候会超出背景，且和滑块的相对位置会发生变化 最右侧是418 - 图片宽度 = 350
-                sliding_scale = max_sliding / img_max_sliding # 滑块和图片滑动的比例 1.0571428571 图片滑动比较慢
-                scaled_distance = round(img_distance * sliding_scale) # 滑块需要滑动的实际距离
-                logging.info(f"CAPTCHA distance={distance}, img_distance={img_distance:.3f}, canvas_width={canvas_width}, scale={scale:.3f}, sliding_scale={sliding_scale:.3f}, scaled={scaled_distance}\r")
+                max_sliding = canvas_width - 40  # 滑块最多可以滑动的距离
+                img_max_sliding = canvas_width + 8 - 68  # 图片最多可以滑动的距离
+                sliding_scale = max_sliding / img_max_sliding if img_max_sliding > 0 else 1.0
+                scaled_distance = round(img_distance * sliding_scale)
+                logging.info(f"CAPTCHA distance={distance}, img_distance={img_distance:.3f}, canvas_width={canvas_width}, canvas_height={canvas_height}, sliding_scale={sliding_scale:.3f}, scaled={scaled_distance}\r")
 
                 self._sliding_track(driver, scaled_distance)
                 time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
