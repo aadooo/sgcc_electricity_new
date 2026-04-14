@@ -564,28 +564,60 @@ class DataFetcher:
 
     def _get_electric_balance(self, driver):
         try:
+            # 优先查找"账户余额"文本对应的值（预付费账户）
+            # 页面结构: <p>您的账户余额为：<b class="cff8">51.08元</b></p>
             try:
-                # 定位是否有"应交金额"标题（确认是后缴费账户）
-                title_text = driver.find_element(By.XPATH, "//p[contains(@class, 'balance_title') and contains(text(), '应交金额')]").text
-                if "应交金额" in title_text:
-                    # 后缴费账户：需要查找"账户余额"，而不是"应交金额"
-                    # 查找包含"账户余额"的balance_title元素，然后获取其内部的金额
-                    balance_content = driver.find_element(By.XPATH, "//p[contains(@class, 'balance_title') and contains(text(), '账户余额')]")
-                    # 提取数字部分
-                    balance_text = re.sub(r'[^\d.]', '', balance_content.text)
-                    if balance_text:
-                        return float(balance_text)
-            except Exception as e:
-                # 后缴费账户解析失败，继续尝试预缴费账户逻辑
-                pass
-
-            # 2. 预缴费账户的"账户余额"（原逻辑）
-            balance_text = driver.find_element(By.CLASS_NAME, "cff8").text
-            balance = balance_text.replace("元", "")
-            if "欠费" in balance_text:
-                return -float(balance)
-            else:
+                # 方法1: 找到包含"您的账户余额为："的<p>或<div>，获取其内的<b class="cff8">值
+                balance_container = driver.find_element(By.XPATH, "//*[contains(text(), '您的账户余额为：')]")
+                cff8_element = balance_container.find_element(By.CLASS_NAME, "cff8")
+                balance_text = cff8_element.text
+                balance = balance_text.replace("元", "").strip()
+                logging.info(f"[DEBUG] Found 账户余额 (方法1): {balance} 元")
                 return float(balance)
+            except Exception as e1:
+                logging.info(f"[DEBUG] 方法1失败: {e1}")
+
+            # 方法2: 查找"账户余额"文本，取其后面的<b class="cff8">值
+            try:
+                # 找到"账户余额"文本所在的元素
+                zhanghu_elem = driver.find_element(By.XPATH, "//*[contains(text(), '账户余额')]")
+                # 向上找父容器
+                parent = zhanghu_elem
+                for _ in range(5):  # 最多向上5层
+                    try:
+                        parent = parent.find_element(By.XPATH, "..")
+                        # 在父容器内找 cff8
+                        cff8_elements = parent.find_elements(By.CLASS_NAME, "cff8")
+                        for cff8 in cff8_elements:
+                            txt = cff8.text
+                            if "元" in txt and re.match(r'^[\d.]+元$', txt.strip()):
+                                balance = txt.replace("元", "").strip()
+                                logging.info(f"[DEBUG] Found 账户余额 (方法2): {balance} 元")
+                                return float(balance)
+                    except:
+                        break
+            except Exception as e2:
+                logging.info(f"[DEBUG] 方法2失败: {e2}")
+
+            # 方法3: 直接找<b class="cff8">，取第一个包含"元"的
+            try:
+                cff8_elements = driver.find_elements(By.CLASS_NAME, "cff8")
+                for cff8 in cff8_elements:
+                    txt = cff8.text.strip()
+                    if "元" in txt:
+                        balance = txt.replace("元", "").strip()
+                        # 验证是有效的数字
+                        try:
+                            val = float(balance)
+                            logging.info(f"[DEBUG] Found 账户余额 (方法3): {balance} 元")
+                            return val
+                        except:
+                            continue
+            except Exception as e3:
+                logging.info(f"[DEBUG] 方法3失败: {e3}")
+
+            logging.warning("[WARNING] 所有方法都无法提取账户余额")
+            return None
         except Exception as e:
             logging.error(f"Failed to get balance: {e}")
             return None
