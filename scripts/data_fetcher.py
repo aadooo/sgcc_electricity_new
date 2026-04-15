@@ -133,37 +133,61 @@ class DataFetcher:
         return True
 
     def _sliding_track(self, driver, distance):
-        """Human-like sliding: accelerate → cruise → decelerate → micro-rebound."""
+        """Human-like sliding: accelerate → cruise → decelerate → micro-rebound.
+        
+        更自然的滑动轨迹模拟，提高滑块验证通过率
+        """
         slider = driver.find_element(By.CLASS_NAME, "slide-verify-slider-mask-item")
         ActionChains(driver).click_and_hold(slider).perform()
+        time.sleep(random.uniform(0.05, 0.1))  # 初始停顿
 
         moved = 0
-        accel_end = distance * 0.4
-        cruise_end = distance * 0.8
+        # 分段：快速启动 → 匀速 → 减速 → 微调
+        accel_end = distance * 0.35
+        cruise_end = distance * 0.75
+        decel_end = distance * 0.95
 
         while moved < distance:
             remaining = distance - moved
+            
             if moved < accel_end:
-                step = random.randint(8, 16)
-                delay = random.uniform(0.005, 0.02)
+                # 快速启动阶段：较大步长
+                step = random.randint(10, 20)
+                delay = random.uniform(0.008, 0.025)
             elif moved < cruise_end:
-                step = random.randint(4, 10)
-                delay = random.uniform(0.01, 0.03)
+                # 匀速阶段：中等步长
+                step = random.randint(6, 12)
+                delay = random.uniform(0.015, 0.035)
+            elif moved < decel_end:
+                # 减速阶段：较小步长
+                step = random.randint(3, 7)
+                delay = random.uniform(0.025, 0.05)
             else:
-                step = random.randint(1, 4)
-                delay = random.uniform(0.02, 0.06)
+                # 微调阶段：极小步长
+                step = random.randint(1, 3)
+                delay = random.uniform(0.04, 0.08)
 
             step = min(step, remaining)
-            y_jitter = random.uniform(-1, 1)
+            # Y轴抖动模拟人类手部不稳定性
+            y_jitter = random.uniform(-1.5, 1.5)
             ActionChains(driver).move_by_offset(xoffset=step, yoffset=y_jitter).perform()
             moved += step
             time.sleep(delay)
+            
+            # 偶尔停顿模拟思考
+            if random.random() < 0.1:
+                time.sleep(random.uniform(0.05, 0.15))
 
-        # micro-rebound before releasing
-        rebound = random.randint(1, 3)
-        ActionChains(driver).move_by_offset(xoffset=-rebound, yoffset=0).perform()
-        time.sleep(random.uniform(0.05, 0.15))
+        # 到达目标后短暂停顿
+        time.sleep(random.uniform(0.03, 0.08))
+        
+        # 微回弹（模拟手指抬起时的轻微滑动）
+        rebound = random.randint(1, 4)
+        ActionChains(driver).move_by_offset(xoffset=-rebound, yoffset=random.uniform(-0.5, 0.5)).perform()
+        time.sleep(random.uniform(0.05, 0.12))
+        
         ActionChains(driver).release().perform()
+        time.sleep(random.uniform(0.1, 0.2))
 
     def insert_expand_data(self, data:dict):
         self.db.insert_expand_data(data)
@@ -282,22 +306,60 @@ class DataFetcher:
                     'return document.getElementById("slideVerify").childNodes[0].height;'
                 )
                 logging.info(f"Canvas size: {canvas_width}x{canvas_height}\r")
+                
+                # 获取滑块和缺口图片的宽度信息
+                try:
+                    block_width = driver.execute_script(
+                        'return document.getElementsByClassName("slide-verify-block")[0].width;'
+                    )
+                    logging.info(f"Block width: {block_width}\r")
+                except:
+                    block_width = 40  # 默认值
+                
                 # Resize to square for ONNX model
                 square_size = 416
                 background_image = background_image.resize((square_size, square_size), Image.LANCZOS)
                 distance = self.onnx.get_distance(background_image)
+                
+                if distance <= 0:
+                    logging.warning("ONNX failed to detect gap, using fallback distance")
+                    # 使用默认距离范围内的随机值
+                    distance = random.randint(150, 280)
+                
                 # Scale detected distance back to actual canvas width
                 img_distance = distance * (canvas_width / square_size)
                 
-                # 滑块滑动和图片空缺的移动不一致
+                # 滑块滑动和图片空缺的移动不一致，需要校正
+                # 滑块起始位置大约在 x=0，滑块宽度约 40px
+                # 缺口位置需要减去滑块宽度的一半作为偏移
                 max_sliding = canvas_width - 40  # 滑块最多可以滑动的距离
-                img_max_sliding = canvas_width + 8 - 68  # 图片最多可以滑动的距离
-                sliding_scale = max_sliding / img_max_sliding if img_max_sliding > 0 else 1.0
-                scaled_distance = round(img_distance * sliding_scale)
-                logging.info(f"CAPTCHA distance={distance}, img_distance={img_distance:.3f}, canvas_width={canvas_width}, canvas_height={canvas_height}, sliding_scale={sliding_scale:.3f}, scaled={scaled_distance}\r")
+                
+                # 添加随机偏移量（±5px）增加真实性
+                offset = random.uniform(-5, 5)
+                scaled_distance = round(img_distance + offset)
+                
+                # 确保距离在有效范围内
+                scaled_distance = max(50, min(scaled_distance, max_sliding))
+                
+                logging.info(f"CAPTCHA: raw_distance={distance}, img_distance={img_distance:.1f}, "
+                           f"canvas={canvas_width}x{canvas_height}, block_w={block_width}, "
+                           f"offset={offset:.1f}, final={scaled_distance}\r")
 
                 self._sliding_track(driver, scaled_distance)
                 time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
+                
+                # 检查滑块是否验证成功
+                try:
+                    # 检查是否有成功提示或者滑块消失
+                    success_indicator = driver.execute_script(
+                        'return document.querySelector(".slide-verify-slider-mask-item") === null || '
+                        'document.querySelector(".slide-verify-success") !== null;'
+                    )
+                    if success_indicator:
+                        logging.info(f"Sliding CAPTCHA verification success on attempt {retry_times}\r")
+                except:
+                    pass
+                
                 if (driver.current_url == LOGIN_URL): # if login not success
                     try:
                         error = self._get_error_message(driver, "//div[@class='errmsg-tip']//span")
@@ -307,8 +369,22 @@ class DataFetcher:
                         else:
                             logging.info(f"Sliding CAPTCHA recognition failed and reloaded.\r")
 
+                        # 随机延迟后再重试
+                        retry_delay = random.uniform(1.0, 3.0)
+                        logging.info(f"Waiting {retry_delay:.1f}s before retry {retry_times+1}...\r")
+                        time.sleep(retry_delay)
+                        
+                        # 点击刷新验证码按钮（如果有）
+                        try:
+                            refresh_btn = driver.find_element(By.CLASS_NAME, "slide-verify-refresh-btn")
+                            driver.execute_script("arguments[0].click();", refresh_btn)
+                            time.sleep(0.5)
+                            logging.info("Clicked refresh button for new CAPTCHA\r")
+                        except:
+                            pass
+                        
                         self._click_button(driver, By.CLASS_NAME, "el-button.el-button--primary")
-                        time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2)
+                        time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2 + random.uniform(0.5, 1.5))
                         continue
                     except:
                         logging.debug(
@@ -563,60 +639,125 @@ class DataFetcher:
             driver.quit()
 
     def _get_electric_balance(self, driver):
+        """获取电费余额
+        
+        支持多种页面结构：
+        1. 预付费账户：显示"您的账户余额为：XX元"
+        2. 后付费账户：显示"上月应交电费"或"待交电费"
+        """
         try:
-            # 优先查找"账户余额"文本对应的值（预付费账户）
-            # 页面结构: <p>您的账户余额为：<b class="cff8">51.08元</b></p>
+            # 等待页面加载完成
+            time.sleep(1)
+            
+            # 确保在余额页面
             try:
-                # 方法1: 找到包含"您的账户余额为："的<p>或<div>，获取其内的<b class="cff8">值
-                balance_container = driver.find_element(By.XPATH, "//*[contains(text(), '您的账户余额为：')]")
-                cff8_element = balance_container.find_element(By.CLASS_NAME, "cff8")
-                balance_text = cff8_element.text
-                balance = balance_text.replace("元", "").strip()
-                logging.info(f"[DEBUG] Found 账户余额 (方法1): {balance} 元")
-                return float(balance)
-            except Exception as e1:
-                logging.info(f"[DEBUG] 方法1失败: {e1}")
-
-            # 方法2: 查找"账户余额"文本，取其后面的<b class="cff8">值
-            try:
-                # 找到"账户余额"文本所在的元素
-                zhanghu_elem = driver.find_element(By.XPATH, "//*[contains(text(), '账户余额')]")
-                # 向上找父容器
-                parent = zhanghu_elem
-                for _ in range(5):  # 最多向上5层
-                    try:
-                        parent = parent.find_element(By.XPATH, "..")
-                        # 在父容器内找 cff8
-                        cff8_elements = parent.find_elements(By.CLASS_NAME, "cff8")
-                        for cff8 in cff8_elements:
-                            txt = cff8.text
-                            if "元" in txt and re.match(r'^[\d.]+元$', txt.strip()):
-                                balance = txt.replace("元", "").strip()
-                                logging.info(f"[DEBUG] Found 账户余额 (方法2): {balance} 元")
-                                return float(balance)
-                    except:
-                        break
-            except Exception as e2:
-                logging.info(f"[DEBUG] 方法2失败: {e2}")
-
-            # 方法3: 直接找<b class="cff8">，取第一个包含"元"的
-            try:
-                cff8_elements = driver.find_elements(By.CLASS_NAME, "cff8")
-                for cff8 in cff8_elements:
-                    txt = cff8.text.strip()
-                    if "元" in txt:
-                        balance = txt.replace("元", "").strip()
-                        # 验证是有效的数字
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '余额') or contains(text(), '电费')]"))
+                )
+            except:
+                logging.warning("Balance page may not be fully loaded")
+            
+            # ====== 方法1: 直接找包含余额/电费的文本 ======
+            balance_patterns = [
+                ("您的账户余额为：", "cff8"),  # 预付费
+                ("待交电费", None),
+                ("上月应交电费", None),
+                ("应交电费", None),
+                ("余额", "cff8"),
+            ]
+            
+            for pattern, css_class in balance_patterns:
+                try:
+                    # 找到包含文本的元素
+                    container = driver.find_element(By.XPATH, f"//*[contains(text(), '{pattern}')]")
+                    
+                    if css_class:
+                        # 尝试在容器内找指定class的元素
                         try:
-                            val = float(balance)
-                            logging.info(f"[DEBUG] Found 账户余额 (方法3): {balance} 元")
-                            return val
+                            value_elem = container.find_element(By.CLASS_NAME, css_class)
+                            balance_text = value_elem.text.strip()
+                            if balance_text:
+                                balance = balance_text.replace("元", "").replace("￥", "").strip()
+                                if re.match(r'^[\d.]+$', balance):
+                                    logging.info(f"[Balance] Found via pattern '{pattern}' with class '{css_class}': {balance} 元")
+                                    return float(balance)
                         except:
-                            continue
-            except Exception as e3:
-                logging.info(f"[DEBUG] 方法3失败: {e3}")
+                            pass
+                    
+                    # 尝试在父级元素中查找数值
+                    parent = container
+                    for _ in range(5):
+                        try:
+                            parent = parent.find_element(By.XPATH, "..")
+                            # 查找所有可能包含金额的元素
+                            for elem in parent.find_elements(By.XPATH, ".//*[contains(text(), '元')]"):
+                                text = elem.text.strip()
+                                # 匹配 "123.45元" 或 "￥123.45" 格式
+                                match = re.search(r'(\d+\.?\d*)元', text)
+                                if match:
+                                    balance = match.group(1)
+                                    logging.info(f"[Balance] Found via parent search: {balance} 元")
+                                    return float(balance)
+                        except:
+                            break
+                except:
+                    continue
+            
+            # ====== 方法2: 直接找所有包含"元"的元素，筛选金额 ======
+            try:
+                for elem in driver.find_elements(By.XPATH, "//*[contains(text(), '元')]"):
+                    text = elem.text.strip()
+                    # 匹配金额格式：数字+.数字+元
+                    match = re.search(r'(\d+\.?\d*)元', text)
+                    if match:
+                        amount = float(match.group(1))
+                        # 过滤不合理金额（0-10000之间）
+                        if 0 < amount < 10000:
+                            logging.info(f"[Balance] Found amount in '元' text: {amount} 元 (from: {text})")
+                            return amount
+            except Exception as e:
+                logging.debug(f"Method '元' search failed: {e}")
 
-            logging.warning("[WARNING] 所有方法都无法提取账户余额")
+            # ====== 方法3: 通过 XPath 精确匹配 ======
+            xpaths = [
+                "//b[@class='cff8']",  # 原方法
+                "//span[contains(@class, 'money')]",
+                "//span[contains(@class, 'balance')]",
+                "//div[contains(@class, 'balance')]//span",
+                "//p[contains(., '余额')]//b",
+                "//p[contains(., '电费')]//span",
+            ]
+            
+            for xpath in xpaths:
+                try:
+                    elements = driver.find_elements(By.XPATH, xpath)
+                    for elem in elements:
+                        text = elem.text.strip()
+                        match = re.search(r'(\d+\.?\d*)', text)
+                        if match:
+                            amount = float(match.group(1))
+                            if 0 < amount < 10000:
+                                logging.info(f"[Balance] Found via xpath '{xpath}': {amount} 元")
+                                return amount
+                except:
+                    continue
+
+            # ====== 方法4: 截图保存用于调试 ======
+            try:
+                debug_dir = "/data/debug"
+                os.makedirs(debug_dir, exist_ok=True)
+                screenshot_path = os.path.join(debug_dir, f"balance_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+                driver.save_screenshot(screenshot_path)
+                logging.warning(f"[WARNING] All balance extraction methods failed. Screenshot saved to: {screenshot_path}")
+                
+                # 保存页面源码用于分析
+                html_path = os.path.join(debug_dir, f"balance_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                logging.info(f"[DEBUG] Page source saved to: {html_path}")
+            except Exception as e:
+                logging.debug(f"Failed to save debug files: {e}")
+                
             return None
         except Exception as e:
             logging.error(f"Failed to get balance: {e}")
