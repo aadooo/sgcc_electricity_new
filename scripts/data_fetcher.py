@@ -272,6 +272,15 @@ class DataFetcher:
             return True
         # 增加判空校验便于测试fallback
         elif self._password is not None and len(self._password) > 0:
+            # 勾选同意协议（必须步骤）
+            try:
+                agree_checkbox = driver.find_element(By.CLASS_NAME, "checked-box.un-checked")
+                driver.execute_script("arguments[0].click();", agree_checkbox)
+                time.sleep(0.5)
+                logging.info("Clicked agree checkbox\r")
+            except Exception as e:
+                logging.debug(f"Agree checkbox not found or already checked: {e}\r")
+            
             # input username and password
             input_elements = driver.find_elements(By.CLASS_NAME, "el-input__inner")
             input_elements[0].send_keys(self._username)
@@ -281,14 +290,53 @@ class DataFetcher:
 
             # click login button
             self._click_button(driver, By.CLASS_NAME, "el-button.el-button--primary")
-            time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2)
             logging.info("Click login button.\r")
+            
+            # 等待滑块验证码加载（点击登录后才会出现）
+            time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT + random.uniform(0.5, 1.5))
+            
+            # 等待滑块canvas出现
+            try:
+                WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.ID, "slideVerify"))
+                )
+                logging.info("Slide verify canvas loaded\r")
+                # 额外等待canvas渲染完成
+                time.sleep(1)
+            except Exception as e:
+                logging.warning(f"Slide verify not found, may have login directly: {e}\r")
+                # 检查是否已经登录成功
+                if driver.current_url != LOGIN_URL:
+                    return True
+            
             # sometimes ddddOCR may fail, so add retry logic)
             for retry_times in range(1, self.RETRY_TIMES_LIMIT + 1):
                 
-                el = driver.find_element(By.XPATH, '//*[@id="login_box"]/div[1]/div[1]/div[2]/span')
-                driver.execute_script("arguments[0].click();", el)
-                time.sleep(1)
+                try:
+                    # 检查滑块是否可见
+                    slider = driver.find_element(By.CLASS_NAME, "slide-verify-slider-mask-item")
+                    if not slider.is_displayed():
+                        logging.info("Slider not visible, checking login status\r")
+                        if driver.current_url != LOGIN_URL:
+                            return True
+                        time.sleep(2)
+                        continue
+                except:
+                    # 滑块不存在，可能已经登录成功
+                    if driver.current_url != LOGIN_URL:
+                        return True
+                    logging.warning("Slider element not found\r")
+                    time.sleep(2)
+                    continue
+                
+                # 点击用户名密码登录tab切换（有时需要重新切换）
+                try:
+                    el = driver.find_element(By.XPATH, '//*[@id="login_box"]/div[1]/div[1]/div[2]/span')
+                    if el.is_displayed():
+                        driver.execute_script("arguments[0].click();", el)
+                        time.sleep(1)
+                except:
+                    pass
                 #get canvas image
                 background_JS = 'return document.getElementById("slideVerify").childNodes[0].toDataURL("image/png");'
                 # targe_JS = 'return document.getElementsByClassName("slide-verify-block")[0].toDataURL("image/png");'
