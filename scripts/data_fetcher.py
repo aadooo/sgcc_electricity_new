@@ -345,8 +345,7 @@ class DataFetcher:
                 background = im_info.split(',')[1]  
                 background_image = base64_to_PLI(background)
                 logging.info(f"Get electricity canvas image successfully.\r")
-                # ONNX model expects square input; canvas is 410x200 (rectangular)
-                # Resize to square (416x416) before model inference, then scale back
+                # 获取 canvas 实际尺寸
                 canvas_width = driver.execute_script(
                     'return document.getElementById("slideVerify").childNodes[0].width;'
                 )
@@ -355,7 +354,7 @@ class DataFetcher:
                 )
                 logging.info(f"Canvas size: {canvas_width}x{canvas_height}\r")
                 
-                # 获取滑块和缺口图片的宽度信息
+                # 获取滑块宽度
                 try:
                     block_width = driver.execute_script(
                         'return document.getElementsByClassName("slide-verify-block")[0].width;'
@@ -364,23 +363,40 @@ class DataFetcher:
                 except:
                     block_width = 40  # 默认值
                 
-                # Resize to square for ONNX model
-                square_size = 416
-                background_image = background_image.resize((square_size, square_size), Image.LANCZOS)
-                distance = self.onnx.get_distance(background_image)
+                # ====== 使用等比缩放（letterbox）代替暴力拉伸 ======
+                # ONNX 模型输入尺寸
+                model_size = 416
+                orig_w, orig_h = background_image.size
+                
+                # 计算等比缩放比例，取较小值保证图像不变形
+                scale = min(model_size / orig_w, model_size / orig_h)
+                new_w = int(orig_w * scale)
+                new_h = int(orig_h * scale)
+                
+                # 等比缩放
+                resized = background_image.resize((new_w, new_h), Image.LANCZOS)
+                
+                # 创建 416x416 灰色背景，将缩放后的图居中贴上
+                padded = Image.new('RGB', (model_size, model_size), (114, 114, 114))
+                pad_x = (model_size - new_w) // 2
+                pad_y = (model_size - new_h) // 2
+                padded.paste(resized, (pad_x, pad_y))
+                
+                # ONNX 推理
+                distance = self.onnx.get_distance(padded)
                 
                 if distance <= 0:
                     logging.warning("ONNX failed to detect gap, using fallback distance")
-                    # 使用默认距离范围内的随机值
+                    # 对于 410px 宽的 canvas，缺口通常在 100-350px 范围
                     distance = random.randint(150, 280)
                 
-                # Scale detected distance back to actual canvas width
-                img_distance = distance * (canvas_width / square_size)
+                # ====== 正确的坐标还原 ======
+                # ONNX 返回的是在 416x416 模型空间中的 x 坐标
+                # 去掉 padding → 除以 scale → 得到原始 canvas 中的 x 坐标
+                img_distance = (distance - pad_x) / scale
                 
-                # 滑块滑动和图片空缺的移动不一致，需要校正
-                # 滑块起始位置大约在 x=0，滑块宽度约 40px
-                # 缺口位置需要减去滑块宽度的一半作为偏移
-                max_sliding = canvas_width - 40  # 滑块最多可以滑动的距离
+                # 滑块滑动距离 ≈ 缺口 x 坐标（滑块起始在左侧）
+                max_sliding = canvas_width - block_width if block_width else canvas_width - 40
                 
                 # 添加随机偏移量（±5px）增加真实性
                 offset = random.uniform(-5, 5)
@@ -389,7 +405,8 @@ class DataFetcher:
                 # 确保距离在有效范围内
                 scaled_distance = max(50, min(scaled_distance, max_sliding))
                 
-                logging.info(f"CAPTCHA: raw_distance={distance}, img_distance={img_distance:.1f}, "
+                logging.info(f"CAPTCHA: raw_dist={distance}, scale={scale:.3f}, "
+                           f"pad=({pad_x},{pad_y}), img_dist={img_distance:.1f}, "
                            f"canvas={canvas_width}x{canvas_height}, block_w={block_width}, "
                            f"offset={offset:.1f}, final={scaled_distance}\r")
 
@@ -690,12 +707,33 @@ class DataFetcher:
         """获取电费余额
         
         支持多种页面结构：
-        1. 预付费账户：显示"您的账户余额为：XX元"
-        2. 后付费账户：显示"上月应交电费"或"待交电费"
+        1. 预付费账户：显示"您的账户余额为：XX元" / "当前可用余额" / "电费余额"
+        2. 后付费账户：显示"上月应交电费" / "待交电费"
         """
         try:
             # 等待页面加载完成
-            time.sleep(1)
+            time.sleep(2)
+            
+            # ====== 先关闭可能的弹窗/提示 ======
+            try:
+                # 关闭可能出现的确认弹窗
+                for xpath in [
+                    "//button[contains(text(), '确定')]",
+                    "//button[contains(text(), '我知道了')]", 
+                    "//span[contains(text(), '关闭')]",
+                    "//div[@class='el-dialog__headerbtn']",
+                    "//button[contains(@class, 'el-button--primary') and contains(text(), '确')]",
+                ]:
+                    try:
+                        btn = driver.find_element(By.XPATH, xpath)
+                        if btn.is_displayed():
+                            driver.execute_script("arguments[0].click();", btn)
+                            time.sleep(0.5)
+                            logging.info(f"Dismissed popup: {xpath}")
+                    except:
+                        pass
+            except:
+                pass
             
             # 确保在余额页面
             try:
@@ -705,9 +743,54 @@ class DataFetcher:
             except:
                 logging.warning("Balance page may not be fully loaded")
             
+            # ====== 方法0: 预付费用户专用 — 页面顶部大字余额 ======
+            # 预付费用户页面通常有 "当前可用余额" 或 "账户余额" 大字显示
+            prepaid_selectors = [
+                # 常见的预付费余额显示位置
+                ("//div[contains(@class,'balance')]//span[contains(@class,'money')]", None),
+                ("//div[contains(@class,'account-balance')]//span", None),
+                ("//span[contains(text(), '当前可用余额')]", "parent"),
+                ("//span[contains(text(), '账户余额')]", "parent"),
+                ("//span[contains(text(), '电费余额')]", "parent"),
+                ("//p[contains(text(), '余额')]", "sibling"),
+                ("//div[contains(text(), '余额')]", "sibling"),
+                ("//h3[contains(text(), '余额')]", "sibling"),
+            ]
+            
+            for xpath, mode in prepaid_selectors:
+                try:
+                    elem = driver.find_element(By.XPATH, xpath)
+                    if mode == "parent":
+                        # 向上查找包含金额的父元素
+                        parent = elem
+                        for _ in range(5):
+                            parent = parent.find_element(By.XPATH, "..")
+                            text = parent.text
+                            match = re.search(r'(\d+\.?\d*)\s*元', text)
+                            if match:
+                                amount = float(match.group(1))
+                                if 0 < amount < 100000:
+                                    logging.info(f"[Balance-Prepaid] Found via parent: {amount} 元 (text: {text[:50]})")
+                                    return amount
+                    elif mode == "sibling":
+                        parent = elem
+                        for _ in range(3):
+                            parent = parent.find_element(By.XPATH, "..")
+                            for child in parent.find_elements(By.XPATH, ".//*[contains(text(), '元')]"):
+                                match = re.search(r'(\d+\.?\d*)\s*元', child.text)
+                                if match:
+                                    amount = float(match.group(1))
+                                    if 0 < amount < 100000:
+                                        logging.info(f"[Balance-Prepaid] Found via sibling: {amount} 元")
+                                        return amount
+                except:
+                    continue
+            
             # ====== 方法1: 直接找包含余额/电费的文本 ======
             balance_patterns = [
-                ("您的账户余额为：", "cff8"),  # 预付费
+                ("您的账户余额为：", "cff8"),
+                ("当前可用余额", None),
+                ("电费余额", None),
                 ("待交电费", None),
                 ("上月应交电费", None),
                 ("应交电费", None),
@@ -759,8 +842,8 @@ class DataFetcher:
                     match = re.search(r'(\d+\.?\d*)元', text)
                     if match:
                         amount = float(match.group(1))
-                        # 过滤不合理金额（0-10000之间）
-                        if 0 < amount < 10000:
+                        # 过滤不合理金额（0-100000之间）
+                        if 0 < amount < 100000:
                             logging.info(f"[Balance] Found amount in '元' text: {amount} 元 (from: {text})")
                             return amount
             except Exception as e:
@@ -768,12 +851,13 @@ class DataFetcher:
 
             # ====== 方法3: 通过 XPath 精确匹配 ======
             xpaths = [
-                "//b[@class='cff8']",  # 原方法
+                "//b[@class='cff8']",
                 "//span[contains(@class, 'money')]",
                 "//span[contains(@class, 'balance')]",
                 "//div[contains(@class, 'balance')]//span",
                 "//p[contains(., '余额')]//b",
                 "//p[contains(., '电费')]//span",
+                "//div[contains(@class, 'info')]//span[contains(@class, 'cff8')]",
             ]
             
             for xpath in xpaths:
@@ -784,7 +868,7 @@ class DataFetcher:
                         match = re.search(r'(\d+\.?\d*)', text)
                         if match:
                             amount = float(match.group(1))
-                            if 0 < amount < 10000:
+                            if 0 < amount < 100000:
                                 logging.info(f"[Balance] Found via xpath '{xpath}': {amount} 元")
                                 return amount
                 except:
