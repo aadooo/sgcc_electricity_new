@@ -354,12 +354,12 @@ class DataFetcher:
                 )
                 logging.info(f"Canvas size: {canvas_width}x{canvas_height}\r")
                 
-                # 获取滑块宽度
+                # 获取滑块手柄宽度（slide-verify-slider-mask-item 是滑块 DIV，不是 block canvas）
                 try:
                     block_width = driver.execute_script(
-                        'return document.getElementsByClassName("slide-verify-block")[0].width;'
+                        'return document.getElementsByClassName("slide-verify-slider-mask-item")[0].getBoundingClientRect().width;'
                     )
-                    logging.info(f"Block width: {block_width}\r")
+                    logging.info(f"Slider handle width: {block_width}\\r")
                 except:
                     block_width = 40  # 默认值
                 
