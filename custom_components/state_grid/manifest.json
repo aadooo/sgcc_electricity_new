@@ -1,0 +1,11 @@
+{
+  "domain": "state_grid",
+  "name": "国家电网",
+  "codeowners": [
+    "@aadooo"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/aadooo/sgcc_electricity_new",
+  "iot_class": "cloud_polling",
+  "version": "1.7.4"
+}
