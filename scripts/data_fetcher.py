@@ -133,37 +133,47 @@ class DataFetcher:
         return True
 
     def _sliding_track(self, driver, distance):
-        """Human-like sliding: accelerate → cruise → decelerate → micro-rebound."""
+        """Human-like sliding with better anti-detection."""
         slider = driver.find_element(By.CLASS_NAME, "slide-verify-slider-mask-item")
         ActionChains(driver).click_and_hold(slider).perform()
+        
+        # 初始停顿，模拟人类反应时间
+        time.sleep(random.uniform(0.3, 0.7))
 
         moved = 0
-        accel_end = distance * 0.4
-        cruise_end = distance * 0.8
+        # 5个阶段：慢启动 → 加速 → 匀速 → 减速 → 慢停
+        segments = [
+            (0.15, 1, 3, random.uniform(0.04, 0.08)),   # 慢启动 15%
+            (0.35, 2, 6, random.uniform(0.02, 0.04)),    # 加速 20%
+            (0.65, 3, 8, random.uniform(0.015, 0.03)),   # 匀速 30%
+            (0.85, 2, 5, random.uniform(0.02, 0.04)),    # 减速 20%
+            (1.0, 1, 3, random.uniform(0.03, 0.06))      # 慢停 15%
+        ]
 
-        while moved < distance:
-            remaining = distance - moved
-            if moved < accel_end:
-                step = random.randint(8, 16)
-                delay = random.uniform(0.005, 0.02)
-            elif moved < cruise_end:
-                step = random.randint(4, 10)
-                delay = random.uniform(0.01, 0.03)
-            else:
-                step = random.randint(1, 4)
-                delay = random.uniform(0.02, 0.06)
+        for seg_end, min_step, max_step, base_delay in segments:
+            seg_target = int(distance * seg_end)
+            while moved < seg_target and moved < distance:
+                remaining = int(distance - moved)
+                step = random.randint(min_step, max_step)
+                step = min(step, remaining)
+                if step <= 0:
+                    break
+                delay = base_delay + random.uniform(-0.01, 0.02)
+                delay = max(0.01, delay)
+                y_jitter = random.uniform(-3, 3)
+                ActionChains(driver).move_by_offset(xoffset=step, yoffset=y_jitter).perform()
+                moved += step
+                time.sleep(delay)
 
-            step = min(step, remaining)
-            y_jitter = random.uniform(-1, 1)
-            ActionChains(driver).move_by_offset(xoffset=step, yoffset=y_jitter).perform()
-            moved += step
-            time.sleep(delay)
-
-        # micro-rebound before releasing
-        rebound = random.randint(1, 3)
+        logging.info(f"Sliding completed for {distance}px, moved={moved}")
+        
+        # 停顿 + 回弹 + 释放
+        time.sleep(random.uniform(0.15, 0.3))
+        rebound = random.randint(3, 8)
         ActionChains(driver).move_by_offset(xoffset=-rebound, yoffset=0).perform()
-        time.sleep(random.uniform(0.05, 0.15))
+        time.sleep(random.uniform(0.08, 0.15))
         ActionChains(driver).release().perform()
+        time.sleep(random.uniform(0.15, 0.3))
 
     def insert_expand_data(self, data:dict):
         self.db.insert_expand_data(data)
