@@ -252,19 +252,20 @@ class DataFetcher:
         finally:
             driver.implicitly_wait(self.DRIVER_IMPLICITY_WAIT_TIME)  # 恢复隐式等待
 
-        # 点击 .user 按钮切换到密码登录表单（优先 .user，因为它真正触发表单显示）
+        # 点击"账号密码或验证码登录"切换到密码登录表单（优先此按钮，.user是空div不触发切换）
         try:
-            user_element = WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME).until(
-                EC.element_to_be_clickable((By.CLASS_NAME, 'user')))
-            driver.execute_script("arguments[0].click();", user_element)
-            logging.info("Clicked 'user' button to show login form.\r")
+            # 优先查找"账号密码或验证码登录"或"账号密码"文本按钮
+            login_switch = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), '账号密码')]")))
+            driver.execute_script("arguments[0].click();", login_switch)
+            logging.info("Clicked '账号密码' switch button.\r")
         except Exception as e:
-            logging.warning(f"Failed to click .user: {e}, trying XPATH fallback.")
+            logging.warning(f"Failed to click '账号密码': {e}, trying .user fallback.")
             try:
-                login_switch = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), '账号密码')]")))
-                driver.execute_script("arguments[0].click();", login_switch)
-                logging.info("Clicked '账号密码' switch button (fallback).\r")
+                user_element = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.CLASS_NAME, 'user')))
+                driver.execute_script("arguments[0].click();", user_element)
+                logging.info("Clicked 'user' button as fallback.\r")
             except:
                 logging.error("Failed to find any login switch button")
         
@@ -275,11 +276,11 @@ class DataFetcher:
             logging.info("Login form is now visible.\r")
         except Exception as e:
             logging.warning(f"Login form not visible after 15s: {e}")
-            # 再次点击 .user 强制显示表单
+            # 再次点击"账号密码"按钮强制显示表单
             try:
-                user_element = driver.find_element(By.CLASS_NAME, 'user')
-                driver.execute_script("arguments[0].click();", user_element)
-                logging.info("Re-clicked 'user' button.\r")
+                login_switch = driver.find_element(By.XPATH, "//*[contains(text(), '账号密码')]")
+                driver.execute_script("arguments[0].click();", login_switch)
+                logging.info("Re-clicked '账号密码' switch button.\r")
                 time.sleep(2)
                 WebDriverWait(driver, 10).until(
                     EC.visibility_of_element_located((By.CSS_SELECTOR, '.account-login')))
