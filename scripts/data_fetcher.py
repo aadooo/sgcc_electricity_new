@@ -133,45 +133,63 @@ class DataFetcher:
         return True
 
     def _sliding_track(self, driver, distance):
-        """Human-like sliding with better anti-detection."""
+        """Human-like sliding with acceleration curve matching real mouse movement"""
         slider = driver.find_element(By.CLASS_NAME, "slide-verify-slider-mask-item")
         ActionChains(driver).click_and_hold(slider).perform()
         
-        # 初始停顿，模拟人类反应时间
+        # 初始停顿
         time.sleep(random.uniform(0.3, 0.7))
 
         moved = 0
-        # 5个阶段：慢启动 → 加速 → 匀速 → 减速 → 慢停
-        segments = [
-            (0.15, 1, 3, random.uniform(0.04, 0.08)),   # 慢启动 15%
-            (0.35, 2, 6, random.uniform(0.02, 0.04)),    # 加速 20%
-            (0.65, 3, 8, random.uniform(0.015, 0.03)),   # 匀速 30%
-            (0.85, 2, 5, random.uniform(0.02, 0.04)),    # 减速 20%
-            (1.0, 1, 3, random.uniform(0.03, 0.06))      # 慢停 15%
-        ]
-
-        for seg_end, min_step, max_step, base_delay in segments:
-            seg_target = int(distance * seg_end)
-            while moved < seg_target and moved < distance:
-                remaining = int(distance - moved)
-                step = random.randint(min_step, max_step)
-                step = min(step, remaining)
-                if step <= 0:
-                    break
-                delay = base_delay + random.uniform(-0.01, 0.02)
-                delay = max(0.01, delay)
-                y_jitter = random.uniform(-3, 3)
-                ActionChains(driver).move_by_offset(xoffset=step, yoffset=y_jitter).perform()
-                moved += step
-                time.sleep(delay)
+        # 使用加速度曲线：慢-快-慢，更像人类鼠标移动
+        # 参考：ease-out 曲线，前期快后期慢
+        
+        while moved < distance:
+            remaining = distance - moved
+            progress = moved / distance if distance > 0 else 1
+            
+            # 根据进度计算步进：开始快，结尾慢
+            if progress < 0.3:
+                # 起步加速
+                step = random.randint(8, 15)
+            elif progress < 0.7:
+                # 中间匀速偏快
+                step = random.randint(5, 12)
+            elif progress < 0.9:
+                # 接近目标减速
+                step = random.randint(3, 6)
+            else:
+                # 最后微调
+                step = random.randint(1, 3)
+            
+            step = min(step, remaining)
+            if step <= 0:
+                break
+            
+            # y轴小幅度随机偏移（模拟手抖）
+            y_jitter = random.uniform(-2, 2)
+            
+            ActionChains(driver).move_by_offset(xoffset=step, yoffset=y_jitter).perform()
+            moved += step
+            
+            # 延迟：越接近目标越慢
+            if progress < 0.5:
+                delay = random.uniform(0.01, 0.03)
+            else:
+                delay = random.uniform(0.02, 0.06)
+            time.sleep(delay)
 
         logging.info(f"Sliding completed for {distance}px, moved={moved}")
         
-        # 停顿 + 回弹 + 释放
-        time.sleep(random.uniform(0.15, 0.3))
-        rebound = random.randint(3, 8)
+        # 到达后短暂停顿（人类反应时间）
+        time.sleep(random.uniform(0.05, 0.15))
+        
+        # 微小回弹（2-5px）
+        rebound = random.randint(2, 5)
         ActionChains(driver).move_by_offset(xoffset=-rebound, yoffset=0).perform()
-        time.sleep(random.uniform(0.08, 0.15))
+        time.sleep(random.uniform(0.03, 0.08))
+        
+        # 释放
         ActionChains(driver).release().perform()
         time.sleep(random.uniform(0.15, 0.3))
 
@@ -215,13 +233,16 @@ class DataFetcher:
 
     @ErrorWatcher.watch
     def _login(self, driver, phone_code = False):
+        # 随机延迟，模拟人类行为
+        time.sleep(random.uniform(2, 5))
+        
         try:
             driver.get(LOGIN_URL)
             WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME * 3).until(EC.visibility_of_element_located((By.CLASS_NAME, "user")))
         except:
             logging.debug(f"Login failed, open URL: {LOGIN_URL} failed.")
         logging.info(f"Open LOGIN_URL:{LOGIN_URL}.\r")
-        time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2)
+        time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2 + random.uniform(1, 3))
         # swtich to username-password login page
         # 临时关闭隐式等待，避免与 WebDriverWait 叠加导致超时
         driver.implicitly_wait(0)
@@ -231,16 +252,79 @@ class DataFetcher:
         finally:
             driver.implicitly_wait(self.DRIVER_IMPLICITY_WAIT_TIME)  # 恢复隐式等待
 
-        element = WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME).until(
-            EC.presence_of_element_located((By.CLASS_NAME, 'user')))
-        driver.execute_script("arguments[0].click();", element)
-        logging.info("find_element 'user'.\r")
-        self._click_button(driver, By.XPATH, '//*[@id="login_box"]/div[1]/div[1]/div[2]/span')
-        time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
-        # click agree button
-        self._click_button(driver, By.XPATH, '//*[@id="login_box"]/div[2]/div[1]/form/div[1]/div[3]/div/span[2]')
-        logging.info("Click the Agree option.\r")
-        time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
+        # 点击 .user 按钮切换到密码登录表单（优先 .user，因为它真正触发表单显示）
+        try:
+            user_element = WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME).until(
+                EC.element_to_be_clickable((By.CLASS_NAME, 'user')))
+            driver.execute_script("arguments[0].click();", user_element)
+            logging.info("Clicked 'user' button to show login form.\r")
+        except Exception as e:
+            logging.warning(f"Failed to click .user: {e}, trying XPATH fallback.")
+            try:
+                login_switch = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), '账号密码')]")))
+                driver.execute_script("arguments[0].click();", login_switch)
+                logging.info("Clicked '账号密码' switch button (fallback).\r")
+            except:
+                logging.error("Failed to find any login switch button")
+        
+        # 等待登录表单可见（.account-login 从 display:none 变为可见）
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.visibility_of_element_located((By.CSS_SELECTOR, '.account-login')))
+            logging.info("Login form is now visible.\r")
+        except Exception as e:
+            logging.warning(f"Login form not visible after 15s: {e}")
+            # 再次点击 .user 强制显示表单
+            try:
+                user_element = driver.find_element(By.CLASS_NAME, 'user')
+                driver.execute_script("arguments[0].click();", user_element)
+                logging.info("Re-clicked 'user' button.\r")
+                time.sleep(2)
+                WebDriverWait(driver, 10).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, '.account-login')))
+                logging.info("Login form visible after re-click.\r")
+            except Exception as e2:
+                logging.warning(f"Login form still not visible: {e2}")
+                # 最后尝试直接检查密码表单
+                try:
+                    pwd_form = driver.find_element(By.CSS_SELECTOR, '.password_form')
+                    if pwd_form and pwd_form.is_displayed():
+                        logging.info("Password form is displayed directly.\r")
+                    else:
+                        logging.error("Password form exists but is hidden, aborting login.")
+                        return False
+                except:
+                    logging.error("Cannot find login form at all.")
+                    return False
+        time.sleep(random.uniform(0.5, 1.5))
+        
+        # 确保切换到"密码登录"标签
+        try:
+            pwd_tab = driver.find_element(By.CSS_SELECTOR, '.password_login.switchs')
+            driver.execute_script("arguments[0].click();", pwd_tab)
+            time.sleep(random.uniform(0.3, 0.8))
+        except:
+            pass  # 可能已经是密码登录模式
+        
+        # 勾选"同意协议"复选框 — 实际元素是 .checked-box.un-checked
+        # 在密码登录表单中找（data-v-118eba9d 前缀的是密码表单）
+        try:
+            checkbox = driver.find_element(By.CSS_SELECTOR, '.password_form .checked-box.un-checked')
+            driver.execute_script("arguments[0].click();", checkbox)
+            logging.info("Clicked agree checkbox (.checked-box.un-checked).\r")
+        except Exception as e:
+            logging.warning(f"Failed to click agree checkbox: {e}, trying alternative selector.")
+            # 备用方案：点击包含"同意"文字的 span 的父元素
+            try:
+                book_span = driver.find_element(By.CSS_SELECTOR, '.password_form .book')
+                driver.execute_script("arguments[0].click();", book_span)
+                logging.info("Clicked book span as fallback.\r")
+            except:
+                logging.warning("All agree checkbox selectors failed.")
+        
+        time.sleep(random.uniform(0.3, 0.8))
+        
         if phone_code:
             self._click_button(driver, By.XPATH, '//*[@id="login_box"]/div[1]/div[1]/div[3]/span')
             input_elements = driver.find_elements(By.CLASS_NAME, "el-input__inner")
@@ -258,22 +342,73 @@ class DataFetcher:
             return True
         # 增加判空校验便于测试fallback
         elif self._password is not None and len(self._password) > 0:
-            # input username and password
-            input_elements = driver.find_elements(By.CLASS_NAME, "el-input__inner")
-            input_elements[0].send_keys(self._username)
+            # 在密码登录表单中找输入框（.password_form 内的 .el-input__inner）
+            pwd_form = driver.find_element(By.CSS_SELECTOR, '.password_form')
+            input_elements = pwd_form.find_elements(By.CSS_SELECTOR, '.el-input__inner')
+            
+            # 模拟人类输入：逐字符输入用户名
+            for char in self._username:
+                input_elements[0].send_keys(char)
+                time.sleep(random.uniform(0.05, 0.15))
             logging.info(f"input_elements username : {self._username}\r")
-            input_elements[1].send_keys(self._password)
+            
+            time.sleep(random.uniform(0.5, 1.5))  # 输入用户名后等待
+           
+            # 模拟人类输入：逐字符输入密码
+            for char in self._password:
+                input_elements[1].send_keys(char)
+                time.sleep(random.uniform(0.05, 0.15))
             logging.info(f"input_elements password : {self._password}\r")
+           
+            time.sleep(random.uniform(0.3, 0.8))  # 输入密码后等待
 
-            # click login button
-            self._click_button(driver, By.CLASS_NAME, "el-button.el-button--primary")
-            time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2)
+            # 点击登录按钮 — 先滚动到按钮位置确保可见
+            try:
+                # 找到可见的登录按钮（.el-button--primary 且 text=登录）
+                all_primary_btns = driver.find_elements(By.CSS_SELECTOR, '.el-button--primary')
+                login_btn = None
+                for btn in all_primary_btns:
+                    if btn.is_displayed() and '登录' in btn.text:
+                        login_btn = btn
+                        break
+                if login_btn:
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", login_btn)
+                    time.sleep(0.5)
+                    driver.execute_script("arguments[0].click();", login_btn)
+                    logging.info("Clicked login button.\r")
+                else:
+                    logging.warning("No visible login button found, trying fallback.")
+                    login_btn = driver.find_element(By.CSS_SELECTOR, '.el-button--primary')
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", login_btn)
+                    time.sleep(0.5)
+                    driver.execute_script("arguments[0].click();", login_btn)
+                    logging.info("Clicked login button (fallback).\r")
+            time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2 + random.uniform(1, 2))
             logging.info("Click login button.\r")
             # sometimes ddddOCR may fail, so add retry logic)
             for retry_times in range(1, self.RETRY_TIMES_LIMIT + 1):
-                
-                el = driver.find_element(By.XPATH, '//*[@id="login_box"]/div[1]/div[1]/div[2]/span')
-                driver.execute_script("arguments[0].click();", el)
+                # 等待滑块验证码容器出现（点击登录后才会加载）
+                try:
+                    WebDriverWait(driver, 15).until(
+                        EC.presence_of_element_located((By.ID, "slideVerify")))
+                    logging.info("CAPTCHA container (#slideVerify) appeared.\r")
+                except Exception as e:
+                    logging.warning(f"CAPTCHA not appeared after login click: {e}")
+                    # 可能不需要验证码或已登录成功
+                    if driver.current_url != LOGIN_URL:
+                        logging.info("URL changed, may have logged in without CAPTCHA.\r")
+                        break
+                    continue
+
+                # 尝试点击滑块验证码触发按钮（如果需要手动触发）
+                try:
+                    slide_btn = driver.find_element(By.CSS_SELECTOR, '.slide-verify-btn')
+                    if slide_btn.is_displayed():
+                        driver.execute_script("arguments[0].click();", slide_btn)
+                        logging.info("Clicked slide-verify-btn.\r")
+                        time.sleep(1)
+                except:
+                    pass  # CAPTCHA might already be active
                 #get canvas image
                 background_JS = 'return document.getElementById("slideVerify").childNodes[0].toDataURL("image/png");'
                 # targe_JS = 'return document.getElementsByClassName("slide-verify-block")[0].toDataURL("image/png");'
@@ -288,28 +423,48 @@ class DataFetcher:
                     'return document.getElementById("slideVerify").childNodes[0].width;'
                 )
                 scale = canvas_width / 416.0
-                # https://github.com/ARC-MX/sgcc_electricity_new/issues/242
-                img_distance = distance * scale # 图片空缺的实际距离
-                
-                # 滑块滑动和图片空缺的移动不一致
-                max_sliding = 410 - 40 # 滑块最多可以滑动的距离  图片 - 滑块宽度 = 370
-                img_max_sliding = 418 - 68 # 图片最多可以滑动的距离 滑动到最大时候会超出背景，且和滑块的相对位置会发生变化 最右侧是418 - 图片宽度 = 350
-                sliding_scale = max_sliding / img_max_sliding # 滑块和图片滑动的比例 1.0571428571 图片滑动比较慢
-                scaled_distance = round(img_distance * sliding_scale) # 滑块需要滑动的实际距离
-                logging.info(f"CAPTCHA distance={distance}, img_distance={img_distance:.3f}, canvas_width={canvas_width}, scale={scale:.3f}, sliding_scale={sliding_scale:.3f}, scaled={scaled_distance}\r")
+                # 直接缩放到canvas尺寸，不再用复杂的sliding_scale
+                scaled_distance = round(distance * scale)
+                logging.info(f"CAPTCHA distance={distance}, canvas_width={canvas_width}, scale={scale:.3f}, scaled={scaled_distance}\r")
 
+                time.sleep(random.uniform(0.5, 1.5))  # 滑动前随机等待
                 self._sliding_track(driver, scaled_distance)
-                time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
+                time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT + random.uniform(0.5, 1.5))
+                
+                # 调试：滑动后截图 - 保存到config目录方便访问
+                try:
+                    debug_dir = "/config/debug/screenshots"
+                    import os
+                    os.makedirs(debug_dir, exist_ok=True)
+                    timestamp = time.strftime("%Y%m%d_%H%M%S")
+                    screenshot_path = f"{debug_dir}/after_slide_{timestamp}.png"
+                    driver.save_screenshot(screenshot_path)
+                    logging.info(f"Debug screenshot saved: {screenshot_path}\r")
+                except Exception as e:
+                    logging.debug(f"Failed to save debug screenshot: {e}")
+                
                 if (driver.current_url == LOGIN_URL): # if login not success
                     try:
                         error = self._get_error_message(driver, "//div[@class='errmsg-tip']//span")
                         if error:
                             # 网络连接超时（RK001）,请重试！ 可能是登录次数过多导致
-                            logging.info(f"Sliding CAPTCHA recognition failed [{error}] and reloaded.\r")
+                            logging.info(f"Sliding CAPTCHA recognition failed [{error}] and loaded.\r")
+                        
+                        # 调试：失败时截图 - 保存到config目录方便访问
+                        try:
+                            debug_dir = "/config/debug/screenshots"
+                            import os
+                            os.makedirs(debug_dir, exist_ok=True)
+                            timestamp = time.strftime("%Y%m%d_%H%M%S")
+                            fail_screenshot = f"{debug_dir}/fail_{timestamp}.png"
+                            driver.save_screenshot(fail_screenshot)
+                            logging.info(f"Debug fail screenshot saved: {fail_screenshot}\r")
+                        except Exception as e:
+                            logging.debug(f"Failed to save fail screenshot: {e}")
                         else:
                             logging.info(f"Sliding CAPTCHA recognition failed and reloaded.\r")
 
-                        self._click_button(driver, By.CLASS_NAME, "el-button.el-button--primary")
+                        self._click_button(driver, By.CSS_SELECTOR, ".el-button.el-button--primary")
                         time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2)
                         continue
                     except:
@@ -565,29 +720,70 @@ class DataFetcher:
             driver.quit()
 
     def _get_electric_balance(self, driver):
+        """
+        获取电费余额 - 支持多种页面格式
+        """
         try:
+            # 方法1: 后缴费账户 - 查找"应交金额"标题
             try:
-                # 定位是否有"应交金额"标题（确认是后缴费账户）
                 title_text = driver.find_element(By.XPATH, "//p[contains(@class, 'balance_title') and contains(text(), '应交金额')]").text
                 if "应交金额" in title_text:
-                    # 后缴费账户：需要查找"账户余额"，而不是"应交金额"
-                    # 查找包含"账户余额"的balance_title元素，然后获取其内部的金额
                     balance_content = driver.find_element(By.XPATH, "//p[contains(@class, 'balance_title') and contains(text(), '账户余额')]")
-                    # 提取数字部分
                     balance_text = re.sub(r'[^\d.]', '', balance_content.text)
                     if balance_text:
+                        logging.info(f"Method 1 (balance_title): Found balance {balance_text}")
                         return float(balance_text)
-            except Exception as e:
-                # 后缴费账户解析失败，继续尝试预缴费账户逻辑
+            except:
                 pass
 
-            # 2. 预缴费账户的"账户余额"（原逻辑）
-            balance_text = driver.find_element(By.CLASS_NAME, "cff8").text
-            balance = balance_text.replace("元", "")
-            if "欠费" in balance_text:
-                return -float(balance)
-            else:
+            # 方法2: 预缴费账户 - 查找 cff8 类元素
+            try:
+                balance_text = driver.find_element(By.CLASS_NAME, "cff8").text
+                balance = balance_text.replace("元", "")
+                if "欠费" in balance_text:
+                    logging.info(f"Method 2 (cff8): Found debt balance -{balance}")
+                    return -float(balance)
+                else:
+                    logging.info(f"Method 2 (cff8): Found balance {balance}")
+                    return float(balance)
+            except:
+                pass
+
+            # 方法3: 通用方法 - 从页面文本中用正则提取余额
+            # 支持格式: "您的账户余额为：47.08元"、"账户余额：47.08元"、"余额：47.08元"
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            
+            # 匹配 "您的账户余额为：xxx元"
+            match = re.search(r'您的账户余额为[：:]*\s*([\d.]+)', page_text)
+            if match:
+                balance = match.group(1)
+                logging.info(f"Method 3a (regex): Found balance {balance}")
                 return float(balance)
+            
+            # 匹配 "账户余额：xxx元" 或 "账户余额为xxx元"
+            match = re.search(r'账户余额[为：:]*\s*([\d.]+)', page_text)
+            if match:
+                balance = match.group(1)
+                logging.info(f"Method 3b (regex): Found balance {balance}")
+                return float(balance)
+            
+            # 匹配 "余额：xxx元"
+            match = re.search(r'余额[：:]*\s*([\d.]+)', page_text)
+            if match:
+                balance = match.group(1)
+                logging.info(f"Method 3c (regex): Found balance {balance}")
+                return float(balance)
+            
+            # 匹配 "xxx元" (最后尝试)
+            match = re.search(r'([\d.]+)元', page_text)
+            if match:
+                balance = match.group(1)
+                logging.info(f"Method 3d (regex fallback): Found balance {balance}")
+                return float(balance)
+            
+            logging.error("All methods failed to find balance")
+            return None
+            
         except Exception as e:
             logging.error(f"Failed to get balance: {e}")
             return None
@@ -785,3 +981,4 @@ if __name__ == "__main__":
         test1 = f.read()
         print(type(test1))
         print(test1)
+
