@@ -252,22 +252,47 @@ class DataFetcher:
         finally:
             driver.implicitly_wait(self.DRIVER_IMPLICITY_WAIT_TIME)  # 恢复隐式等待
 
-        # 点击"账号密码或验证码登录"切换到密码登录表单（优先此按钮，.user是空div不触发切换）
+        # 先关闭可能弹出的同意协议弹窗（.modal-container）
         try:
-            # 优先查找"账号密码或验证码登录"或"账号密码"文本按钮
-            login_switch = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), '账号密码')]")))
-            driver.execute_script("arguments[0].click();", login_switch)
-            logging.info("Clicked '账号密码' switch button.\r")
+            modal_buttons = driver.find_elements(By.CSS_SELECTOR, '.modal-container button')
+            for btn in modal_buttons:
+                if '同意' in btn.text:
+                    driver.execute_script("arguments[0].click();", btn)
+                    logging.info("Dismissed agreement modal.\r")
+                    time.sleep(1)
+                    break
         except Exception as e:
-            logging.warning(f"Failed to click '账号密码': {e}, trying .user fallback.")
+            logging.debug(f"No modal to dismiss or dismiss failed: {e}")
+
+        # 切换到密码登录 — Vue.js SPA需要调用组件方法而非DOM点击
+        # 先尝试用Vue组件的userLoginClick方法
+        switched = driver.execute_script("""
+            var allEls = document.querySelectorAll('*');
+            for (var i = 0; i < allEls.length; i++) {
+                if (allEls[i].__vue__ && allEls[i].__vue__.$options.methods && allEls[i].__vue__.$options.methods.userLoginClick) {
+                    allEls[i].__vue__.userLoginClick();
+                    return true;
+                }
+            }
+            return false;
+        """)
+        if switched:
+            logging.info("Switched to password login via Vue userLoginClick().\r")
+        else:
+            # 备用方案：直接点击.switchs.sweepCode元素
+            logging.warning("Vue userLoginClick not found, trying direct element click.\r")
             try:
-                user_element = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.CLASS_NAME, 'user')))
-                driver.execute_script("arguments[0].click();", user_element)
-                logging.info("Clicked 'user' button as fallback.\r")
-            except:
-                logging.error("Failed to find any login switch button")
+                switch_el = driver.find_element(By.CSS_SELECTOR, '.ewm-login .login_ewm .switch .switchs.sweepCode')
+                driver.execute_script("arguments[0].click();", switch_el)
+                logging.info("Clicked .switchs.sweepCode directly.\r")
+            except Exception as e:
+                logging.warning(f"Direct click also failed: {e}, trying XPATH fallback.")
+                try:
+                    login_switch = driver.find_element(By.XPATH, "//div[contains(@class, 'ewm-login')]//div[contains(@class, 'switch')]//div[contains(@class, 'switchs')]")
+                    driver.execute_script("arguments[0].click();", login_switch)
+                    logging.info("Clicked switch via XPATH fallback.\r")
+                except:
+                    logging.error("Failed to find any login switch element")
         
         # 等待登录表单可见（.account-login 从 display:none 变为可见）
         try:
@@ -276,15 +301,22 @@ class DataFetcher:
             logging.info("Login form is now visible.\r")
         except Exception as e:
             logging.warning(f"Login form not visible after 15s: {e}")
-            # 再次点击"账号密码"按钮强制显示表单
+            # 再次调用Vue方法切换到密码登录
             try:
-                login_switch = driver.find_element(By.XPATH, "//*[contains(text(), '账号密码')]")
-                driver.execute_script("arguments[0].click();", login_switch)
-                logging.info("Re-clicked '账号密码' switch button.\r")
+                driver.execute_script("""
+                    var allEls = document.querySelectorAll('*');
+                    for (var i = 0; i < allEls.length; i++) {
+                        if (allEls[i].__vue__ && allEls[i].__vue__.$options.methods && allEls[i].__vue__.$options.methods.userLoginClick) {
+                            allEls[i].__vue__.userLoginClick();
+                            break;
+                        }
+                    }
+                """)
+                logging.info("Re-called Vue userLoginClick().\r")
                 time.sleep(2)
                 WebDriverWait(driver, 10).until(
                     EC.visibility_of_element_located((By.CSS_SELECTOR, '.account-login')))
-                logging.info("Login form visible after re-click.\r")
+                logging.info("Login form visible after Vue method re-call.\r")
             except Exception as e2:
                 logging.warning(f"Login form still not visible: {e2}")
                 # 最后尝试直接检查密码表单
