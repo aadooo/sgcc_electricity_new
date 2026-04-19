@@ -383,6 +383,8 @@ class DataFetcher:
                     time.sleep(0.5)
                     driver.execute_script("arguments[0].click();", login_btn)
                     logging.info("Clicked login button (fallback).\r")
+            except Exception as e:
+                logging.warning(f"Failed to find/click login button: {e}")
             time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2 + random.uniform(1, 2))
             logging.info("Click login button.\r")
             # sometimes ddddOCR may fail, so add retry logic)
