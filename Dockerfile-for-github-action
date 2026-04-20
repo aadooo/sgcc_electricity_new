@@ -40,5 +40,5 @@ RUN mkdir /data \
 
 ENV LANG=C.UTF-8
 
-# 启动主程序
-CMD ["python3", "main.py"]
+# 启动主程序（通过entrypoint启动Xvfb）
+CMD ["/app/entrypoint.sh"]

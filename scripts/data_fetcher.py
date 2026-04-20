@@ -204,8 +204,13 @@ class DataFetcher:
         else:
             chrome_options = webdriver.ChromeOptions()
 
-            # 使用 headless=new 模式（Chrome 147 非 headless 有崩溃问题）
-            chrome_options.add_argument("--headless=new")
+            # 如果有 Xvfb 虚拟显示器则用 headed 模式，否则 headless
+            if 'DISPLAY' in os.environ:
+                logging.info(f"使用 Xvfb 虚拟显示器: {os.environ['DISPLAY']}")
+                # 不加 --headless，Chrome 会在 Xvfb 上运行
+            else:
+                chrome_options.add_argument("--headless=new")
+                logging.info("无 DISPLAY，使用 headless 模式")
 
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-gpu")
