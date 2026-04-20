@@ -14,6 +14,7 @@ ENV PYTHON_IN_DOCKER='PYTHON_IN_DOCKER'
 
 COPY scripts/* /app/
 WORKDIR /app
+RUN chmod +x /app/entrypoint.sh
 
 RUN apt-get --allow-releaseinfo-change update \
     && apt-get install -y --no-install-recommends jq chromium chromium-driver fonts-noto-cjk tzdata xvfb x11-utils \
@@ -40,4 +41,4 @@ RUN mkdir /data \
 ENV LANG=C.UTF-8
 
 # 启动 Xvfb 虚拟显示，然后运行主程序
-CMD ["sh", "-c", "xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' python3 main.py"]
+CMD ["/app/entrypoint.sh"]
