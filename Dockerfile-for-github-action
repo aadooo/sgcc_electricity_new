@@ -16,7 +16,7 @@ COPY scripts/* /app/
 WORKDIR /app
 
 RUN apt-get --allow-releaseinfo-change update \
-    && apt-get install -y --no-install-recommends jq chromium chromium-driver fonts-noto-cjk tzdata \
+    && apt-get install -y --no-install-recommends jq chromium chromium-driver fonts-noto-cjk tzdata xvfb x11-utils \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && dpkg-reconfigure --frontend noninteractive tzdata \
@@ -39,4 +39,5 @@ RUN mkdir /data \
 
 ENV LANG=C.UTF-8
 
-CMD ["python3","main.py"]
+# 启动 Xvfb 虚拟显示，然后运行主程序
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1920x1080x24 -ac & export DISPLAY=:99 && sleep 1 && python3 main.py"]

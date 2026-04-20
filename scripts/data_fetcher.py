@@ -203,7 +203,14 @@ class DataFetcher:
             latest_release_url="https://msedgedriver.microsoft.com/LATEST_RELEASE").install()))
         else:
             chrome_options = webdriver.ChromeOptions()
-            chrome_options.add_argument("--headless=new")
+
+            # 如果有 DISPLAY 环境变量（xvfb 模式），不使用 headless
+            if os.environ.get('DISPLAY'):
+                logging.info("Using Xvfb virtual display (non-headless mode).\\r")
+                # 不加 --headless，让 Chrome 在虚拟显示器上运行
+            else:
+                chrome_options.add_argument("--headless=new")
+
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--disable-dev-shm-usage")
