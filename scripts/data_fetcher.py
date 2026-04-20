@@ -255,33 +255,16 @@ class DataFetcher:
             try:
                 driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
                     "source": """
-                        // 覆写 webdriver 属性
+                        // 覆写 webdriver 属性（最关键）
                         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                        // 覆写 plugins（模拟真实插件列表）
-                        Object.defineProperty(navigator, 'plugins', {
-                            get: () => [1, 2, 3, 4, 5]
-                        });
                         // 覆写 languages
-                        Object.defineProperty(navigator, 'languages', {
-                            get: () => ['zh-CN', 'zh', 'en']
-                        });
-                        // 覆写 platform
-                        Object.defineProperty(navigator, 'platform', {
-                            get: () => 'Win32'
-                        });
-                        // 覆写 permissions（避免 headless 检测）
-                        const originalQuery = window.navigator.permissions.query;
-                        window.navigator.permissions.query = (parameters) => (
-                            parameters.name === 'notifications' ?
-                                Promise.resolve({ state: Notification.permission }) :
-                                originalQuery(parameters)
-                        );
-                        // 覆写 chrome.runtime（部分网站检测此属性）
-                        window.chrome = { runtime: {} };
-                        // 覆写 connection 属性
-                        Object.defineProperty(navigator, 'connection', {
-                            get: () => ({ rtt: 50, downlink: 10, effectiveType: '4g', saveData: false })
-                        });
+                        try { Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']}); } catch(e) {}
+                        // 覆写 permissions
+                        try {
+                            const origQuery = window.navigator.permissions.query;
+                            window.navigator.permissions.query = (p) =>
+                                p.name === 'notifications' ? Promise.resolve({state: Notification.permission}) : origQuery(p);
+                        } catch(e) {}
                     """
                 })
                 logging.info("CDP anti-detection scripts injected.\\r")
