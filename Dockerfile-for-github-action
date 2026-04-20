@@ -4,8 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV SET_CONTAINER_TIMEZONE=true
 ENV CONTAINER_TIMEZONE=Asia/Shanghai
-ENV TZ=Asia/Shanghai 
-
+ENV TZ=Asia/Shanghai
 
 ARG TARGETARCH
 ARG VERSION
@@ -16,12 +15,23 @@ COPY scripts/* /app/
 WORKDIR /app
 RUN chmod +x /app/entrypoint.sh
 
+# 安装依赖 + 下载 Chrome for Testing v131（避免系统 Chromium 147 崩溃）
 RUN apt-get --allow-releaseinfo-change update \
-    && apt-get install -y --no-install-recommends jq chromium chromium-driver fonts-noto-cjk tzdata xvfb x11-utils \
+    && apt-get install -y --no-install-recommends jq wget unzip fonts-noto-cjk tzdata xvfb x11-utils curl \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && dpkg-reconfigure --frontend noninteractive tzdata \
-    && rm -rf /var/lib/apt/lists/*  \
+    # 下载 Chrome for Testing v131.0.6778.204
+    && wget -q "https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.204/linux64/chrome-linux64.zip" -O /tmp/chrome.zip \
+    && unzip -q /tmp/chrome.zip -d /opt/ \
+    && rm /tmp/chrome.zip \
+    && chmod +x /opt/chrome-linux64/chrome \
+    # 下载 ChromeDriver v131
+    && wget -q "https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.204/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
+    && unzip -q /tmp/chromedriver.zip -d /opt/ \
+    && rm /tmp/chromedriver.zip \
+    && chmod +x /opt/chromedriver-linux64/chromedriver \
+    && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
 COPY ./requirements.txt /tmp/requirements.txt
@@ -35,10 +45,8 @@ RUN mkdir /data \
     -r requirements.txt \
     && rm -rf /tmp/* \
     && pip cache purge \
-    && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/log/*
 
 ENV LANG=C.UTF-8
 
-# 启动主程序（通过entrypoint启动Xvfb）
 CMD ["/app/entrypoint.sh"]

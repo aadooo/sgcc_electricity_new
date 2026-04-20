@@ -241,8 +241,8 @@ class DataFetcher:
 
             # 指定 chromium 和 chromedriver 的路径
             if 'PYTHON_IN_DOCKER' in os.environ:
-                chrome_options.binary_location = "/usr/bin/chromium"
-                service = ChromeService(executable_path="/usr/bin/chromedriver")
+                chrome_options.binary_location = "/opt/chrome-linux64/chrome"
+                service = ChromeService(executable_path="/opt/chromedriver-linux64/chromedriver")
             else:
                 service = ChromeService()
 
