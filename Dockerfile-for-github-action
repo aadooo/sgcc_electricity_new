@@ -40,5 +40,5 @@ RUN mkdir /data \
 
 ENV LANG=C.UTF-8
 
-# 启动 Xvfb 虚拟显示，然后运行主程序
-CMD ["/app/entrypoint.sh"]
+# 启动主程序
+CMD ["python3", "main.py"]
