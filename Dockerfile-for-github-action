@@ -40,4 +40,4 @@ RUN mkdir /data \
 ENV LANG=C.UTF-8
 
 # 启动 Xvfb 虚拟显示，然后运行主程序
-CMD ["sh", "-c", "Xvfb :99 -screen 0 1920x1080x24 -ac & export DISPLAY=:99 && sleep 1 && python3 main.py"]
+CMD ["sh", "-c", "xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' python3 main.py"]
