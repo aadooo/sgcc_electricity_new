@@ -251,25 +251,13 @@ class DataFetcher:
             )
             driver.implicitly_wait(self.DRIVER_IMPLICITY_WAIT_TIME)
 
-            # --- CDP 级别反检测：覆写 navigator.webdriver 等属性 ---
+            # --- JS 级别反检测：通过 execute_script 注入 ---
+            # 注意：不使用 CDP，避免 Chrome 147 兼容性问题
             try:
-                driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-                    "source": """
-                        // 覆写 webdriver 属性（最关键）
-                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                        // 覆写 languages
-                        try { Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']}); } catch(e) {}
-                        // 覆写 permissions
-                        try {
-                            const origQuery = window.navigator.permissions.query;
-                            window.navigator.permissions.query = (p) =>
-                                p.name === 'notifications' ? Promise.resolve({state: Notification.permission}) : origQuery(p);
-                        } catch(e) {}
-                    """
-                })
-                logging.info("CDP anti-detection scripts injected.\\r")
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+                logging.info("Anti-detection JS injected via execute_script.\\r")
             except Exception as e:
-                logging.warning(f"Failed to inject CDP anti-detection: {e}\\r")
+                logging.warning(f"Anti-detection injection skipped: {e}\\r")
         return driver
 
     @ErrorWatcher.watch
