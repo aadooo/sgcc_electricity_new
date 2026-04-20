@@ -208,14 +208,28 @@ class DataFetcher:
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--start-maximized")
+            chrome_options.add_argument("--window-size=1920,1080")
 
             # --- 规避反爬 ---
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option("useAutomationExtension", False)
-            chrome_options.add_argument(
-                "user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+            # 随机化 user-agent，模拟真实浏览器
+            ua_list = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            ]
+            chrome_options.add_argument(f"user-agent={random.choice(ua_list)}")
+
+            # 额外反检测参数
+            chrome_options.add_argument("--disable-infobars")
+            chrome_options.add_argument("--lang=zh-CN,zh")
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--log-level=3")
+            chrome_options.add_argument("--silent")
 
             # 指定 chromium 和 chromedriver 的路径
             if 'PYTHON_IN_DOCKER' in os.environ:
@@ -229,6 +243,43 @@ class DataFetcher:
                 service=service,
             )
             driver.implicitly_wait(self.DRIVER_IMPLICITY_WAIT_TIME)
+
+            # --- CDP 级别反检测：覆写 navigator.webdriver 等属性 ---
+            try:
+                driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": """
+                        // 覆写 webdriver 属性
+                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        // 覆写 plugins（模拟真实插件列表）
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: () => [1, 2, 3, 4, 5]
+                        });
+                        // 覆写 languages
+                        Object.defineProperty(navigator, 'languages', {
+                            get: () => ['zh-CN', 'zh', 'en']
+                        });
+                        // 覆写 platform
+                        Object.defineProperty(navigator, 'platform', {
+                            get: () => 'Win32'
+                        });
+                        // 覆写 permissions（避免 headless 检测）
+                        const originalQuery = window.navigator.permissions.query;
+                        window.navigator.permissions.query = (parameters) => (
+                            parameters.name === 'notifications' ?
+                                Promise.resolve({ state: Notification.permission }) :
+                                originalQuery(parameters)
+                        );
+                        // 覆写 chrome.runtime（部分网站检测此属性）
+                        window.chrome = { runtime: {} };
+                        // 覆写 connection 属性
+                        Object.defineProperty(navigator, 'connection', {
+                            get: () => ({ rtt: 50, downlink: 10, effectiveType: '4g', saveData: false })
+                        });
+                    """
+                })
+                logging.info("CDP anti-detection scripts injected.\\r")
+            except Exception as e:
+                logging.warning(f"Failed to inject CDP anti-detection: {e}\\r")
         return driver
 
     @ErrorWatcher.watch
@@ -466,15 +517,18 @@ class DataFetcher:
                 self._sliding_track(driver, scaled_distance)
                 time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT + random.uniform(0.5, 1.5))
                 
-                # 调试：滑动后截图 - 保存到config目录方便访问
+                # 调试：滑动后截图 - 全页面截图确保包含错误弹窗
                 try:
                     debug_dir = "/config/debug/screenshots"
                     import os
                     os.makedirs(debug_dir, exist_ok=True)
                     timestamp = time.strftime("%Y%m%d_%H%M%S")
                     screenshot_path = f"{debug_dir}/after_slide_{timestamp}.png"
+                    # 滚动到页面顶部确保弹窗可见
+                    driver.execute_script("window.scrollTo(0, 0);")
+                    time.sleep(0.5)
                     driver.save_screenshot(screenshot_path)
-                    logging.info(f"Debug screenshot saved: {screenshot_path}\r")
+                    logging.info(f"Debug screenshot saved: {screenshot_path}\\r")
                 except Exception as e:
                     logging.debug(f"Failed to save debug screenshot: {e}")
                 
@@ -483,21 +537,24 @@ class DataFetcher:
                         error = self._get_error_message(driver, "//div[@class='errmsg-tip']//span")
                         if error:
                             # 网络连接超时（RK001）,请重试！ 可能是登录次数过多导致
-                            logging.info(f"Sliding CAPTCHA recognition failed [{error}] and loaded.\r")
+                            logging.info(f"Sliding CAPTCHA recognition failed [{error}] and loaded.\\r")
                         
-                        # 调试：失败时截图 - 保存到config目录方便访问
+                        # 调试：失败时截图 - 全页面截图包含错误提示
                         try:
                             debug_dir = "/config/debug/screenshots"
                             import os
                             os.makedirs(debug_dir, exist_ok=True)
                             timestamp = time.strftime("%Y%m%d_%H%M%S")
                             fail_screenshot = f"{debug_dir}/fail_{timestamp}.png"
+                            # 滚动到顶部，等待错误弹窗渲染
+                            driver.execute_script("window.scrollTo(0, 0);")
+                            time.sleep(1)
                             driver.save_screenshot(fail_screenshot)
-                            logging.info(f"Debug fail screenshot saved: {fail_screenshot}\r")
+                            logging.info(f"Debug fail screenshot saved: {fail_screenshot}\\r")
                         except Exception as e:
                             logging.debug(f"Failed to save fail screenshot: {e}")
                         else:
-                            logging.info(f"Sliding CAPTCHA recognition failed and reloaded.\r")
+                            logging.info(f"Sliding CAPTCHA recognition failed and reloaded.\\r")
 
                         self._click_button(driver, By.CSS_SELECTOR, ".el-button.el-button--primary")
                         time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT*2)
