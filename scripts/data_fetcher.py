@@ -241,15 +241,8 @@ class DataFetcher:
 
             # 指定 chromium 和 chromedriver 的路径
             if 'PYTHON_IN_DOCKER' in os.environ:
-                # 优先使用 Chrome for Testing v131（比系统 Chromium v147 稳定）
-                chrome131 = '/opt/chrome131/chrome'
-                if os.path.exists(chrome131):
-                    chrome_options.binary_location = chrome131
-                    service = ChromeService(executable_path="/usr/local/bin/chromedriver131")
-                    logging.info("使用 Chrome for Testing v131")
-                else:
-                    chrome_options.binary_location = "/usr/bin/chromium"
-                    service = ChromeService(executable_path="/usr/bin/chromedriver")
+                chrome_options.binary_location = "/opt/chrome-linux64/chrome"
+                service = ChromeService(executable_path="/opt/chromedriver-linux64/chromedriver")
             else:
                 service = ChromeService()
 
