@@ -241,8 +241,15 @@ class DataFetcher:
 
             # 指定 chromium 和 chromedriver 的路径
             if 'PYTHON_IN_DOCKER' in os.environ:
-                chrome_options.binary_location = "/usr/bin/chromium"
-                service = ChromeService(executable_path="/usr/bin/chromedriver")
+                # 优先使用 Chrome for Testing v131（比系统 Chromium v147 稳定）
+                chrome131 = '/opt/chrome131/chrome'
+                if os.path.exists(chrome131):
+                    chrome_options.binary_location = chrome131
+                    service = ChromeService(executable_path="/usr/local/bin/chromedriver131")
+                    logging.info("使用 Chrome for Testing v131")
+                else:
+                    chrome_options.binary_location = "/usr/bin/chromium"
+                    service = ChromeService(executable_path="/usr/bin/chromedriver")
             else:
                 service = ChromeService()
 
@@ -592,9 +599,21 @@ class DataFetcher:
             f.write(img_screenshot)
             logging.info("save qrcode to /data/login_qr_code.png")
 
-        from notify import UrlLoginQrCodeNotify
-        notifyFunc = UrlLoginQrCodeNotify()
-        notifyFunc(img_screenshot)
+        # 调用 Hermes Flask 服务发送微信
+        try:
+            import urllib.request
+            import json
+            url = "http://host.docker.internal:8126/qrcode"
+            req = urllib.request.Request(url, data=img_screenshot, headers={"Content-Type": "image/png"}, method='POST')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                logging.info(f"Hermes 二维码推送响应: {resp.status}")
+        except Exception as e:
+            logging.warning(f"Hermes 二维码推送失败: {e}")
+            # 备用：尝试旧的 URL 推送
+            from notify import UrlLoginQrCodeNotify
+            notifyFunc = UrlLoginQrCodeNotify()
+            notifyFunc(img_screenshot)
+        
         for i in range(1, self.QR_CODE_LOGIN_WAIT_COUNT + 1):
             logging.info(f'qrcode check login wait[{self.QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT}] count[{i}]')
             time.sleep(self.QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT)
