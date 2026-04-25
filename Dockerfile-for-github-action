@@ -4,8 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV SET_CONTAINER_TIMEZONE=true
 ENV CONTAINER_TIMEZONE=Asia/Shanghai
-ENV TZ=Asia/Shanghai 
-
+ENV TZ=Asia/Shanghai
 
 ARG TARGETARCH
 ARG VERSION
@@ -17,12 +16,29 @@ WORKDIR /app
 RUN chmod +x /app/entrypoint.sh
 
 RUN apt-get --allow-releaseinfo-change update \
-    && apt-get install -y --no-install-recommends jq chromium chromium-driver fonts-noto-cjk tzdata xvfb x11-utils \
+    && apt-get install -y --no-install-recommends jq fonts-noto-cjk tzdata xvfb x11-utils wget unzip \
+                       libnss3 libnspr4 libglib2.0-0 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+                       libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+                       libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && dpkg-reconfigure --frontend noninteractive tzdata \
-    && rm -rf /var/lib/apt/lists/*  \
+    && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# 安装 Chrome for Testing v131 + 匹配的 ChromeDriver（替代有bug的系统Chromium v147）
+RUN mkdir -p /opt/chrome131 \
+    && cd /tmp \
+    && wget -q https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.204/linux64/chrome-linux64.zip \
+    && unzip -q chrome-linux64.zip -d /opt/ \
+    && mv /opt/chrome-linux64 /opt/chrome131_bin \
+    && ln -sf /opt/chrome131_bin/chrome /opt/chrome131/chrome \
+    && wget -q https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.204/linux64/chromedriver-linux64.zip \
+    && unzip -q chromedriver-linux64.zip -d /opt/ \
+    && mv /opt/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver131 \
+    && chmod +x /usr/local/bin/chromedriver131 /opt/chrome131/chrome \
+    && rm -rf /tmp/*.zip /opt/chromedriver-linux64 \
+    && echo "Chrome 131 installed OK"
 
 COPY ./requirements.txt /tmp/requirements.txt
 
@@ -33,12 +49,10 @@ RUN mkdir /data \
     --disable-pip-version-check \
     --no-cache-dir \
     -r requirements.txt \
-    && rm -rf /tmp/* \
     && pip cache purge \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/log/*
 
 ENV LANG=C.UTF-8
 
-# 启动主程序（通过entrypoint启动Xvfb）
 CMD ["/app/entrypoint.sh"]
