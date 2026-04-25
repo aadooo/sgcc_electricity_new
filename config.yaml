@@ -31,6 +31,8 @@ options:
   RECHARGE_NOTIFY: false
   BALANCE: 5.0
   PUSHPLUS_TOKEN: "xxxx,xxxx"
+  LOGIN_FALLBACK: "qrcode"
+  PUSH_QRCODE_URL: "http://192.168.1.95:8126/qrcode"
 schema:
   PHONE_NUMBER: str
   PASSWORD: password
@@ -45,3 +47,5 @@ schema:
   RECHARGE_NOTIFY: bool 
   BALANCE: float 
   PUSHPLUS_TOKEN: str
+  LOGIN_FALLBACK: str
+  PUSH_QRCODE_URL: str

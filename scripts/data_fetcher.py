@@ -596,7 +596,7 @@ class DataFetcher:
         try:
             import urllib.request
             import json
-            url = "http://host.docker.internal:8126/qrcode"
+            url = os.getenv("PUSH_QRCODE_URL", "http://192.168.1.95:8126/qrcode")
             req = urllib.request.Request(url, data=img_screenshot, headers={"Content-Type": "image/png"}, method='POST')
             with urllib.request.urlopen(req, timeout=10) as resp:
                 logging.info(f"Hermes 二维码推送响应: {resp.status}")
