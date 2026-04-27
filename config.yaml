@@ -32,7 +32,7 @@ options:
   BALANCE: 5.0
   PUSHPLUS_TOKEN: "xxxx,xxxx"
   LOGIN_FALLBACK: "qrcode"
-  PUSH_QRCODE_URL: "http://192.168.1.95:8126/qrcode"
+  PUSH_QRCODE_URL: "http://192.168.1.95:9100/qrcode"
 schema:
   PHONE_NUMBER: str
   PASSWORD: password
