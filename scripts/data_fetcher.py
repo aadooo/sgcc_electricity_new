@@ -403,8 +403,8 @@ class DataFetcher:
             logging.info("Click login button.\r")
 
             return True
-        # 增加判空校验便于测试fallback
-        elif self._password is not None and len(self._password) > 0:
+        # 增加判空校验便于测试fallback; FORCE_QR 强制跳过密码登录直接二维码
+        elif self._password is not None and len(self._password) > 0 and os.getenv("FORCE_QR") is None:
             # 在密码登录表单中找输入框（.password_form 内的 .el-input__inner）
             pwd_form = driver.find_element(By.CSS_SELECTOR, '.password_form')
             input_elements = pwd_form.find_elements(By.CSS_SELECTOR, '.el-input__inner')
