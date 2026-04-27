@@ -13,7 +13,13 @@ if ! grep -q "95598.cn" /etc/hosts 2>/dev/null; then
     fi
 fi
 
-# Start main application (Chrome 使用 headless=new，不需要 Xvfb)
+# 启动 Xvfb 虚拟显示器（解决 Chrome headless 在某些容器中崩溃的问题）
+Xvfb :99 -screen 0 1920x1080x24 &
+XVFB_PID=$!
+export DISPLAY=:99
+echo "Xvfb started on :99 (PID: $XVFB_PID)"
+
+# Start main application
 python3 main.py &
 APP_PID=$!
 
