@@ -403,8 +403,8 @@ class DataFetcher:
             logging.info("Click login button.\r")
 
             return True
-        # 增加判空校验便于测试fallback; FORCE_QR 强制跳过密码登录直接二维码
-        elif self._password is not None and len(self._password) > 0 and os.getenv("FORCE_QR") is None:
+        # 增加判空校验便于测试fallback
+        elif self._password is not None and len(self._password) > 0:
             # 在密码登录表单中找输入框（.password_form 内的 .el-input__inner）
             pwd_form = driver.find_element(By.CSS_SELECTOR, '.password_form')
             input_elements = pwd_form.find_elements(By.CSS_SELECTOR, '.el-input__inner')
@@ -636,14 +636,15 @@ class DataFetcher:
         updator = SensorUpdator()
         
         try:
+            # 直接使用二维码登录，跳过账号密码
             if os.getenv("DEBUG_MODE", "false").lower() == "true":
-                if self._login(driver,phone_code=True):
+                if self._qr_login(driver):
                     logging.info("login successed !")
                 else:
                     logging.info("login unsuccessed !")
                     raise Exception("login unsuccessed")
             else:
-                if self._login(driver):
+                if self._qr_login(driver):
                     logging.info("login successed !")
                 else:
                     logging.info("login unsuccessed !")
