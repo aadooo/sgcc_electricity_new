@@ -212,13 +212,28 @@ class DataFetcher:
                 chrome_options.add_argument("--headless=new")
                 logging.info("无 DISPLAY，使用 headless=new 模式")
 
+            # === 核心稳定性参数 ===
             chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--disable-gpu-sandbox")
-            chrome_options.add_argument("--start-maximized")
-            chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-software-rasterizer")
+
+            # === 窗口参数 ===
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--start-maximized")
+
+            # === Selenium稳定性增强 ===
+            chrome_options.add_argument("--disable-setuid-sandbox")
+            chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+            chrome_options.add_argument("--disable-breakpad")
+            chrome_options.add_argument("--disable-client-side-phishing-detection")
+            chrome_options.add_argument("--disable-sync")
+            chrome_options.add_argument("--disable-translate")
+            chrome_options.add_argument("--metrics-recording-only")
+            chrome_options.add_argument("--no-first-run")
+            chrome_options.add_argument("--safebrowsing-disable-auto-update")
+            chrome_options.add_argument("--disable-background-networking")
 
             # --- 规避反爬 ---
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -631,26 +646,19 @@ class DataFetcher:
 
         driver = self._get_webdriver()
         ErrorWatcher.instance().set_driver(driver)
-        
-        driver.maximize_window() 
+
+        driver.maximize_window()
         time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
         logging.info("Webdriver initialized.")
         updator = SensorUpdator()
-        
+
         try:
-            # 直接使用二维码登录，跳过账号密码
-            if os.getenv("DEBUG_MODE", "false").lower() == "true":
-                if self._qr_login(driver):
-                    logging.info("login successed !")
-                else:
-                    logging.info("login unsuccessed !")
-                    raise Exception("login unsuccessed")
+            # 直接使用二维码登录
+            if self._qr_login(driver):
+                logging.info("login successed !")
             else:
-                if self._qr_login(driver):
-                    logging.info("login successed !")
-                else:
-                    logging.info("login unsuccessed !")
-                    raise Exception("login unsuccessed")
+                logging.info("login unsuccessed !")
+                raise Exception("login unsuccessed")
         except Exception as e:
             logging.error(
                 f"Webdriver quit abnormly, reason: {e}. {self.RETRY_TIMES_LIMIT} retry times left.")
