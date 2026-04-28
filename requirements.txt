@@ -15,4 +15,4 @@ mysql-connector-python==9.4.0
 # selenium-stealth==1.0.6
 
 # 点击验证码识别（可选，如需使用请取消注释）
-# ddddocr==1.4.11
+# ddddocr==1.4.112026年 04月 28日 星期二 10:20:18 CST
