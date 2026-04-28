@@ -654,7 +654,7 @@ class DataFetcher:
 
         try:
             # 打开登录页
-            driver.get(self.LOGIN_URL)
+            driver.get(LOGIN_URL)
             time.sleep(2)
             # 直接使用二维码登录
             if self._qr_login(driver):
