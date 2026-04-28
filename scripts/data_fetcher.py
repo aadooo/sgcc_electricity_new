@@ -204,13 +204,9 @@ class DataFetcher:
         else:
             chrome_options = webdriver.ChromeOptions()
 
-            # 如果有 Xvfb 虚拟显示器则用 headed 模式（稳定），否则用 headless=new
-            if 'DISPLAY' in os.environ:
-                logging.info(f"使用 Xvfb 虚拟显示器: {os.environ['DISPLAY']}")
-                # 不加 --headless，Chrome 会在 Xvfb 虚拟显示器上运行
-            else:
-                chrome_options.add_argument("--headless=new")
-                logging.info("无 DISPLAY，使用 headless=new 模式")
+            # Chrome 在容器中必须用 headless=new 模式，忽略 DISPLAY 检测
+            chrome_options.add_argument("--headless=new")
+            logging.info("强制使用 headless=new 模式")
 
             # === 核心稳定性参数 ===
             chrome_options.add_argument("--no-sandbox")
