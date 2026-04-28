@@ -10,9 +10,9 @@ mysql-connector-python==9.4.0
 # python-dotenv
 # python-dateutil
 
-# 反爬虫检测绕过
-undetected-chromedriver==3.5.5
-selenium-stealth==1.0.6
+# 反爬虫检测绕过（可选，如需使用请取消注释）
+# undetected-chromedriver==3.5.5
+# selenium-stealth==1.0.6
 
-# 点击验证码识别
-ddddocr==1.4.11
+# 点击验证码识别（可选，如需使用请取消注释）
+# ddddocr==1.4.11
